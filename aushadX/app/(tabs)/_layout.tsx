@@ -88,12 +88,12 @@ export default function TabLayout() {
       name: "Schedule",
       title: "Schedule",
       icon: { focused: "calendar", outline: "calendar-outline" }
+    },
+    {
+      name:"AIChat",
+      title: "AIChat",
+      icon:{ focused:"chatbubble", outline: "chatbubble-outline"}
     }
-    // {
-    //   name:"AIChat",
-    //   title: "AIChat",
-    //   icon:{ focused:"chatbubble", outline: "chatbubble-outline"}
-    // }
   ];
 
   return (
