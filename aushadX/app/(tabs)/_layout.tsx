@@ -89,11 +89,7 @@ export default function TabLayout() {
       title: "Schedule",
       icon: { focused: "calendar", outline: "calendar-outline" }
     },
-    {
-      name:"AIChat",
-      title: "AIChat",
-      icon:{ focused:"chatbubble", outline: "chatbubble-outline"}
-    }
+    
   ];
 
   return (
@@ -173,7 +169,7 @@ export default function TabLayout() {
 const LanguageButton = ({ openModal, currentLanguage }) => (
   <TouchableOpacity onPress={openModal} style={styles.languageButton}>
     <Text style={styles.languageButtonText}>
-      {'🌍'}
+      {''}
     </Text>
   </TouchableOpacity>
 );
