@@ -1,22 +1,38 @@
 {
   "expo": {
-    "name": "aushadX",
-    "slug": "aushadX",
+    "name": "AushadX",
+    "slug": "AushadX",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "aushadx",
+    "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Allow this app to access your photos.",
+        "NSCameraUsageDescription": "Allow this app to access your camera to capture photos of medicine prescriptions.",
+        "NSMicrophoneUsageDescription": "Allow this app to access your microphone when recording videos with prescriptions.",
+        "NSPhotoLibraryAddUsageDescription": "Allow this app to save captured prescription photos to your photo library."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT"
+      ],
+      "package": "com.vipulchinmay.AushadX"
     },
     "web": {
       "bundler": "metro",
@@ -33,10 +49,30 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
-      ]
+      ],
+      "expo-localization",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera.",
+          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone",
+          "photosPermission": "Allow $(PRODUCT_NAME) to access your photos"
+        }
+      ],
+      "react-native-ble-manager",
+      "expo-font",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "c93f2948-34ea-4aa0-9fde-926d63593110"
+      }
     }
   }
 }
