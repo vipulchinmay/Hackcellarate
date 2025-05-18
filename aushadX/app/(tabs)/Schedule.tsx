@@ -3,9 +3,8 @@ import {
   Text,
   StyleSheet,
   Alert,
-  Button,
-  FlatList,
   TouchableOpacity,
+  FlatList,
   Image,
   Linking,
   ScrollView,
@@ -103,6 +102,45 @@ async function registerNotificationCategories() {
   }
 }
 
+// Schedule immediate notification for 2 minutes from now
+async function scheduleImmediateReminder(medicineName: string): Promise<string | undefined> {
+  try {
+    // Set trigger for 2 minutes from now
+    const twoMinutesFromNow = new Date();
+    twoMinutesFromNow.setMinutes(twoMinutesFromNow.getMinutes() + 2);
+    
+    console.log(`Scheduling immediate reminder for ${medicineName} at ${twoMinutesFromNow.toLocaleTimeString()}`);
+    
+    // Create the trigger
+    const trigger = new Date(twoMinutesFromNow);
+    
+    // Prepare notification content
+    const content: Notifications.NotificationContentInput = {
+      title: `Time to take ${medicineName}`,
+      body: `Your reminder for ${medicineName}`,
+      data: { medicationId: `immediate_${Date.now()}`, type: 'immediate' },
+      sound: true,
+    };
+    
+    // Add category for iOS
+    if (Platform.OS === 'ios') {
+      content.categoryIdentifier = "medicine";
+    }
+    
+    // Schedule the notification
+    const identifier = await Notifications.scheduleNotificationAsync({
+      content,
+      trigger,
+    });
+    
+    console.log(`Immediate notification scheduled with ID: ${identifier} for ${twoMinutesFromNow.toLocaleTimeString()}`);
+    return identifier;
+  } catch (error) {
+    console.error("Error scheduling immediate notification:", error);
+    return undefined;
+  }
+}
+
 // Interface for medication reminder data
 interface MedicationReminder {
   id: string;
@@ -131,6 +169,7 @@ export default function Schedule() {
   const [notificationIds, setNotificationIds] = useState<string[]>([]);
   const [pushToken, setPushToken] = useState<string | null>(null);
   const [hasNotificationPermission, setHasNotificationPermission] = useState(false);
+  const [immediatePending, setImmediatePending] = useState(false);
 
   // Improved medicine name extraction function
   const extractMedicineNameFromResponse = (responseText: string): string => {
@@ -338,6 +377,19 @@ export default function Schedule() {
         return;
       }
       
+      // Check if this is an immediate notification
+      const isImmediate = reminderId.toString().startsWith('immediate_');
+      if (isImmediate) {
+        // Just cancel the notification and show success message
+        try {
+          await Notifications.cancelScheduledNotificationAsync(notificationId);
+          Alert.alert(t("Success"), t("Medicine marked as taken!"));
+        } catch (cancelError) {
+          console.error("Error cancelling immediate notification:", cancelError);
+        }
+        return;
+      }
+      
       // Make API call to mark medication as taken
       try {
         await axios.post('/api/medicine/taken', {
@@ -489,15 +541,28 @@ export default function Schedule() {
     }
 
     setIsLoading(true);
+    setImmediatePending(true);
     const currentTime = new Date();
     const savedReminderIds = [];
     const newNotificationIds = [];
     const errorMessages = [];
     let successfulSaves = 0;
     let successfulNotifications = 0;
+    let immediateNotificationId: string | undefined;
 
     try {
-      // Cancel any existing notifications first
+      // First, schedule the immediate notification for 2 minutes from now
+      if (hasNotificationPermission) {
+        immediateNotificationId = await scheduleImmediateReminder(medicineName);
+        if (immediateNotificationId) {
+          newNotificationIds.push(immediateNotificationId);
+          console.log("Reminder Scheduled Successfully");
+        } else {
+          console.error("Failed to schedule immediate notification");
+        }
+      }
+
+      // Cancel any existing notifications for regular reminders
       if (notificationIds.length > 0) {
         for (const id of notificationIds) {
           try {
@@ -573,52 +638,26 @@ export default function Schedule() {
         }
       }
 
-      // Update notification IDs state
+      // Update notification IDs state - include both immediate and regular notifications
       setNotificationIds(newNotificationIds);
       
       // Show appropriate message based on results
-      if (successfulSaves === 0) {
-        // No reminders were saved
+      let successMessage;
+      if (successfulSaves === 0 && !immediateNotificationId) {
+        // No reminders were saved and no immediate notification
         throw new Error("Failed to save any reminders to the database");
-      } 
-      
-      if (successfulSaves === days) {
-        if (hasNotificationPermission && successfulNotifications === days) {
-          // Perfect scenario: all saved and all notifications scheduled
-          Alert.alert(
-            t("Reminders Set"), 
-            t("{{count}} reminders have been scheduled for {{medicine}}").replace("{{count}}", days.toString()).replace("{{medicine}}", medicineName),
-            [{ text: "OK" }]
-          );
-        } else if (hasNotificationPermission && successfulNotifications > 0) {
-          // All saved but only some notifications scheduled
-          Alert.alert(
-            t("Reminders Saved"), 
-            t("All {{count}} reminders saved. {{notificationCount}} notifications scheduled.").replace("{{count}}", days.toString()).replace("{{notificationCount}}", successfulNotifications.toString()),
-            [{ text: "OK" }]
-          );
-        } else if (hasNotificationPermission) {
-          // All saved but no notifications scheduled
-          Alert.alert(
-            t("Reminders Saved"), 
-            t("All {{count}} reminders saved but notifications could not be scheduled. Please check your notification settings.").replace("{{count}}", days.toString()),
-            [{ text: "OK" }]
-          );
-        } else {
-          // All saved, no notification permission
-          Alert.alert(
-            t("Reminders Saved"), 
-            t("All {{count}} reminders saved. Enable notifications in settings to receive alerts.").replace("{{count}}", days.toString()),
-            [{ text: "OK" }]
-          );
-        }
       } else {
-        // Some reminders saved
-        Alert.alert(
-          t("Partial Success"), 
-          t("{{savedCount}} out of {{total}} reminders saved successfully.").replace("{{savedCount}}", successfulSaves.toString()).replace("{{total}}", days.toString()),
-          [{ text: "OK" }]
-        );
+        // Determine message based on what succeeded
+        if (immediateNotificationId) {
+          successMessage = t("Immediate reminder set for 2 minutes from now. ");
+          if (successfulSaves > 0) {
+            successMessage += t("{{count}} reminders have been scheduled for {{medicine}}").replace("{{count}}", days.toString()).replace("{{medicine}}", medicineName);
+          }
+        } else if (successfulSaves > 0) {
+          successMessage = t("{{count}} reminders have been scheduled for {{medicine}}").replace("{{count}}", days.toString()).replace("{{medicine}}", medicineName);
+        }
+        
+        Alert.alert(t("Reminders Set"), successMessage, [{ text: "OK" }]);
       }
     } catch (error) {
       console.error("Failed to schedule reminders:", error);
@@ -632,14 +671,18 @@ export default function Schedule() {
         }
       }
       
-      if (successfulSaves > 0) {
+      if (successfulSaves > 0 || immediateNotificationId) {
         // Some reminders were saved despite errors
-        errorMsg += `\n\n${t("However, {{count}} reminders were saved successfully.").replace("{{count}}", successfulSaves.toString())}`;
+        errorMsg += `\n\n${t("However, some reminders were saved successfully.")}`;
+        if (immediateNotificationId) {
+          errorMsg += `\n${t("Immediate reminder set for 2 minutes from now.")}`;
+        }
       }
       
       Alert.alert(t("Error"), errorMsg);
     } finally {
       setIsLoading(false);
+      setImmediatePending(false);
     }
   };
 
@@ -763,19 +806,22 @@ export default function Schedule() {
           </View>
 
           <View style={styles.buttonContainer}>
-            <Button
-              title={isLoading ? t("Scheduling...") : t("Schedule Reminders")}
+            <TouchableOpacity
+              style={[styles.scheduleButton, isLoading && styles.disabledButton]}
               onPress={scheduleReminders}
               disabled={isLoading}
-              color="#1E90FF"
-            />
-            {isLoading && (
-              <ActivityIndicator
-                style={styles.loadingIndicator}
-                size="small"
-                color="#1E90FF"
-              />
-            )}
+            >
+              <View style={styles.buttonContent}>
+                {isLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Feather name="bell" size={20} color="#FFFFFF" />
+                )}
+                <Text style={styles.buttonText}>
+                  {isLoading ? t("Scheduling...") : t("Schedule Reminders")}
+                </Text>
+              </View>
+            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
@@ -793,23 +839,24 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
     backgroundColor: "#f5f5f5",
-    alignItems: "center",
   },
   title: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: "bold",
-    marginBottom: 10,
+    marginBottom: 15,
+    color: "#333",
+    textAlign: "center",
   },
   infoContainer: {
-    padding: 15,
-    backgroundColor: "#ffffff",
+    backgroundColor: "#fff",
     borderRadius: 10,
+    padding: 15,
+    marginBottom: 20,
+    elevation: 3,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 5,
-    marginTop: 10,
-    width: "100%",
+    shadowRadius: 4,
   },
   infoHeader: {
     flexDirection: "row",
@@ -817,115 +864,129 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   info: {
-    fontSize: 16,
+    fontSize: 14,
+    color: "#444",
+    lineHeight: 20,
     flex: 1,
   },
+  speakerButton: {
+    padding: 8,
+    marginLeft: 10,
+    borderRadius: 20,
+    backgroundColor: "#f0f8ff",
+  },
+  speakerButtonActive: {
+    backgroundColor: "#dcebff",
+  },
   medicineNameContainer: {
+    backgroundColor: "#e6f2ff",
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 20,
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 15,
-    backgroundColor: "#e6f2ff",
-    padding: 10,
-    borderRadius: 8,
-    width: "100%",
+    justifyContent: "center",
   },
   medicineNameLabel: {
     fontSize: 16,
-    fontWeight: "bold",
-    marginRight: 5,
+    fontWeight: "600",
+    marginRight: 6,
+    color: "#333",
   },
   medicineName: {
     fontSize: 16,
+    fontWeight: "bold",
     color: "#1E90FF",
-    fontWeight: "500",
-  },
-  speakerButton: {
-    marginLeft: 10,
-    padding: 8,
-    borderRadius: 20,
-    backgroundColor: "#f0f0f0",
-  },
-  speakerButtonActive: {
-    backgroundColor: "#e6f2ff",
   },
   shoppingContainer: {
-    width: "100%",
-    marginTop: 20,
+    marginBottom: 25,
   },
   shoppingTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    marginBottom: 10,
+    fontSize: 16,
+    fontWeight: "600",
+    marginBottom: 12,
+    color: "#333",
   },
   shoppingItem: {
-    backgroundColor: "#fff",
-    padding: 10,
-    marginRight: 15,
-    borderRadius: 8,
     alignItems: "center",
+    marginRight: 20,
+    width: 100,
   },
   shoppingImage: {
-    width: 80,
-    height: 40,
+    width: 60,
+    height: 60,
+    borderRadius: 10,
+    marginBottom: 8,
     resizeMode: "contain",
   },
   shoppingItemText: {
-    fontSize: 14,
-    color: "#25292e",
-    marginTop: 5,
+    fontSize: 12,
+    textAlign: "center",
+    color: "#555",
   },
   section: {
-    marginTop: 20,
-    width: "100%",
-    alignItems: "center",
+    marginBottom: 20,
   },
   label: {
     fontSize: 16,
-    marginBottom: 5,
+    fontWeight: "600",
+    marginBottom: 10,
+    color: "#333",
   },
   dayCount: {
-    fontSize: 18,
+    textAlign: "center",
+    fontSize: 16,
     fontWeight: "bold",
+    color: "#1E90FF",
+    marginBottom: 8,
   },
   slider: {
-    width: "80%",
+    width: "100%",
     height: 40,
   },
-  buttonContainer: {
-    marginTop: 30,
-    width: "100%",
+  timePickerButton: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 8,
+    padding: 12,
     alignItems: "center",
+  },
+  timePickerText: {
+    fontSize: 16,
+    color: "#1E90FF",
+    fontWeight: "600",
+    alignItems: "center",
+    marginTop: 10,
+  },
+  buttonContainer: {
+    marginTop: 10,
+    marginBottom: 30,
   },
   scheduleButton: {
     backgroundColor: "#1E90FF",
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 25,
+    borderRadius: 10,
+    padding: 16,
+    alignItems: "center",
     elevation: 3,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 3,
+    shadowRadius: 4,
   },
   disabledButton: {
-    backgroundColor: "#7cb7f1",
+    backgroundColor: "#90c8ff",
+    opacity: 0.7,
   },
-  loadingContainer: {
+  buttonContent: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
   },
   buttonText: {
-    color: "white",
+    color: "#fff",
     fontSize: 16,
     fontWeight: "bold",
-    marginLeft: 5,
-  },
-  timePickerText: {
-    fontSize: 16,
-    color: '#1E90FF',
-  },
-  loadingIndicator: {
-    marginLeft: 10,
+    marginLeft: 8,
   }
 });
