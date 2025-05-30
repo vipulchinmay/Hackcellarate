@@ -36,6 +36,7 @@ export default function Index() {
   const imageSlideUp = useRef(new Animated.Value(50)).current;
   const imageScale = useRef(new Animated.Value(0.95)).current;
   const aiButtonAnim = useRef(new Animated.Value(0)).current;
+  const headerAnim = useRef(new Animated.Value(0)).current;
 
   // Start rotation animation for loading spinner
   useEffect(() => {
@@ -114,8 +115,21 @@ export default function Index() {
           duration: 500,
           easing: Easing.out(Easing.back(1.5)),
           useNativeDriver: true,
+        }),
+        Animated.timing(headerAnim, {
+          toValue: 1,
+          duration: 400,
+          delay: 200,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
         })
       ]).start();
+    } else {
+      // Reset animations when no image
+      fadeAnim.setValue(0);
+      imageSlideUp.setValue(50);
+      imageScale.setValue(0.95);
+      headerAnim.setValue(0);
     }
   }, [selectedImage]);
 
@@ -166,6 +180,7 @@ export default function Index() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       quality: 1,
+      aspect: [4, 3],
     });
 
     if (!result.canceled) {
@@ -233,7 +248,7 @@ export default function Index() {
         const base64Image = reader.result.split(",")[1];
 
         // Send the selected language along with the image
-        const serverResponse = await fetch("http://192.168.29.85:5000/scan", {
+        const serverResponse = await fetch("http://192.168.1.177:5000/scan", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
@@ -301,7 +316,7 @@ export default function Index() {
       >
         <View style={styles.container}>
           {/* AI Chat Button */}
-          <Animated.View 
+          {/* <Animated.View 
             style={[
               styles.aiButtonContainer,
               {
@@ -327,10 +342,10 @@ export default function Index() {
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
               >
-                <Ionicons name="fitness-outline" size={40}></Ionicons>
+                <Ionicons name="fitness-outline" size={40} color="white" />
               </LinearGradient>
             </TouchableOpacity>
-          </Animated.View>
+          </Animated.View> */}
 
           {!selectedImage ? (
             <Animated.View 
@@ -365,28 +380,128 @@ export default function Index() {
               </View>
             </Animated.View>
           ) : (
-            <Animated.View 
-              style={[
-                styles.imageContainer, 
-                { 
-                  opacity: fadeAnim,
-                  transform: [
-                    { translateY: imageSlideUp },
-                    { scale: imageScale }
-                  ] 
-                }
-              ]}
-            >
-              <ImageViewer imgSource={selectedImage} />
-              {selectedImage && (
-                <TouchableOpacity 
-                  style={styles.resetButton}
-                  onPress={() => setSelectedImage(null)}
-                >
-                  <Ionicons name="close-circle" size={32} color="white" />
-                </TouchableOpacity>
-              )}
-            </Animated.View>
+            <View style={styles.imageSelectedContainer}>
+              {/* Enhanced Header */}
+              <Animated.View 
+                style={[
+                  styles.imageHeader,
+                  {
+                    opacity: headerAnim,
+                    transform: [{ translateY: headerAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-20, 0]
+                    })}]
+                  }
+                ]}
+              >
+                <View style={styles.headerContent}>
+                  <View style={styles.headerTextContainer}>
+                    <Text style={styles.headerTitle}>{t("Medicine Image")}</Text>
+                    <Text style={styles.headerSubtitle}>
+                      {loading ? t("Analyzing...") : t("Ready to analyze")}
+                    </Text>
+                  </View>
+                  <TouchableOpacity 
+                    style={styles.changeImageButton}
+                    onPress={() => setSelectedImage(null)}
+                    disabled={loading}
+                  >
+                    <Ionicons name="refresh-outline" size={20} color="#007AFF" />
+                    <Text style={styles.changeImageText}>{t("Change")}</Text>
+                  </TouchableOpacity>
+                </View>
+              </Animated.View>
+
+              {/* Enhanced Image Container with proper aspect ratio */}
+              <Animated.View 
+                style={[
+                  styles.enhancedImageContainer, 
+                  { 
+                    opacity: fadeAnim,
+                    transform: [
+                      { translateY: imageSlideUp },
+                      { scale: imageScale }
+                    ] 
+                  }
+                ]}
+              >
+                {/* Image with proper aspect ratio handling */}
+                <View style={styles.imageWrapper}>
+                  <Image 
+                    source={{ uri: selectedImage }}
+                    style={styles.selectedImage}
+                    resizeMode="cover"
+                  />
+                  
+                  {/* Stylish border overlay */}
+                  <View style={styles.imageBorder} />
+                  
+                  {/* Loading overlay */}
+                  {loading && (
+                    <View style={styles.loadingOverlay}>
+                      <BlurView intensity={20} tint="dark" style={styles.loadingBlur}>
+                        <View style={styles.loadingContent}>
+                          <Animated.View style={{ transform: [{ rotate: spinInterpolation }] }}>
+                            <MaterialCommunityIcons name="loading" size={32} color="white" />
+                          </Animated.View>
+                          <Text style={styles.overlayLoadingText}>{t("Scanning...")}</Text>
+                          
+                          {/* Progress dots */}
+                          <View style={styles.progressDots}>
+                            {[0, 1, 2].map(i => (
+                              <Animated.View 
+                                key={i}
+                                style={[
+                                  styles.progressDot,
+                                  {
+                                    opacity: loadingRotation.interpolate({
+                                      inputRange: [0, 0.33, 0.66, 1],
+                                      outputRange: i === 0 ? [1, 0.3, 0.3, 1] : 
+                                                 i === 1 ? [0.3, 1, 0.3, 0.3] : 
+                                                          [0.3, 0.3, 1, 0.3]
+                                    })
+                                  }
+                                ]}
+                              />
+                            ))}
+                          </View>
+                        </View>
+                      </BlurView>
+                    </View>
+                  )}
+                  
+                  {/* Image quality indicator */}
+                  <View style={styles.qualityIndicator}>
+                    <View style={styles.qualityDot} />
+                    <Text style={styles.qualityText}>{t("High Quality")}</Text>
+                  </View>
+                  
+                  {/* Corner accents */}
+                  <View style={styles.cornerAccents}>
+                    <View style={[styles.cornerAccent, styles.topLeft]} />
+                    <View style={[styles.cornerAccent, styles.topRight]} />
+                    <View style={[styles.cornerAccent, styles.bottomLeft]} />
+                    <View style={[styles.cornerAccent, styles.bottomRight]} />
+                  </View>
+                </View>
+                
+                {/* Enhanced Image info bar */}
+                <View style={styles.imageInfoBar}>
+                  <View style={styles.imageInfoItem}>
+                    <Ionicons name="checkmark-circle" size={16} color="#34C759" />
+                    <Text style={styles.imageInfoText}>{t("Image Ready")}</Text>
+                  </View>
+                  <View style={styles.imageInfoItem}>
+                    <Ionicons name="scan" size={16} color="#007AFF" />
+                    <Text style={styles.imageInfoText}>{t("OCR Ready")}</Text>
+                  </View>
+                  <View style={styles.imageInfoItem}>
+                    <MaterialCommunityIcons name="pill" size={16} color="#FF9500" />
+                    <Text style={styles.imageInfoText}>{t("Medicine")}</Text>
+                  </View>
+                </View>
+              </Animated.View>
+            </View>
           )}
 
           <Animated.View 
@@ -427,63 +542,73 @@ export default function Index() {
                   </TouchableOpacity>
                 </View>
               ) : (
-                // Show Analyze button prominently when image is selected
+                // Enhanced UI when image is selected
                 <View style={styles.imageSelectedActionContainer}>
                   {loading ? (
                     <View style={styles.loadingContainer}>
-                      {/* Replace with Lottie animation if available */}
-                      <View style={styles.lottieContainer}>
-                        {/* <LottieView
-                          ref={lottieRef}
-                          source={require('@/assets/animations/scanning-animation.json')}
-                          style={styles.lottie}
-                          autoPlay
-                          loop
-                        /> */}
+                      <View style={styles.loadingHeader}>
+                        <Text style={styles.loadingTitle}>{t("Analyzing Medicine")}</Text>
+                        <Text style={styles.loadingSubtitle}>{t("Please wait while we process your image...")}</Text>
+                      </View>
+                      
+                      <View style={styles.loadingProgressContainer}>
                         <Animated.View style={{ transform: [{ rotate: spinInterpolation }] }}>
-                          <MaterialCommunityIcons name="loading" size={24} color="white" />
+                          <MaterialCommunityIcons name="loading" size={28} color="#007AFF" />
                         </Animated.View>
                       </View>
-                      <Text style={styles.loadingText}>{t("Analyzing Medicine...")}</Text>
                       
                       <TouchableOpacity 
-                        style={styles.floatingAbortButton} 
+                        style={styles.modernAbortButton} 
                         onPress={abortProcessing}
                         activeOpacity={0.9}
                       >
-                        <Ionicons name="close-circle" size={18} color="white" />
-                        <Text style={styles.abortButtonText}>{t("Cancel")}</Text>
+                        <Ionicons name="stop-circle-outline" size={20} color="#FF3B30" />
+                        <Text style={styles.modernAbortText}>{t("Cancel")}</Text>
                       </TouchableOpacity>
                     </View>
                   ) : (
-                    <View style={styles.analyzeActionsContainer}>
+                    <View style={styles.modernActionsContainer}>
+                      {/* Primary action */}
                       <TouchableOpacity
-                        style={styles.analyzeButtonEnhanced}
+                        style={styles.primaryAnalyzeButton}
                         onPress={scanImage}
                         disabled={loading}
                         activeOpacity={0.85}
                       >
-                        <MaterialCommunityIcons name="text-recognition" size={24} color="white" />
-                        <Text style={styles.analyzeButtonTextEnhanced}>{t("Analyze Medicine")}</Text>
+                        <LinearGradient
+                          colors={['#34C759', '#28A745']}
+                          style={styles.primaryButtonGradient}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                        >
+                          <MaterialCommunityIcons name="text-recognition" size={24} color="white" />
+                          <Text style={styles.primaryButtonText}>{t("Analyze Medicine")}</Text>
+                          <Ionicons name="arrow-forward" size={20} color="white" />
+                        </LinearGradient>
                       </TouchableOpacity>
                       
-                      <View style={styles.secondaryActionsRow}>
+                      {/* Secondary actions */}
+                      <View style={styles.secondaryActionsContainer}>
                         <TouchableOpacity 
-                          style={styles.secondaryButton}
+                          style={styles.modernSecondaryButton}
                           onPress={takePhoto}
                           disabled={loading}
                         >
-                          <Ionicons name="camera-outline" size={20} color="#ffffff" />
-                          <Text style={styles.secondaryButtonText}>{t("Retake")}</Text>
+                          <View style={styles.secondaryButtonContent}>
+                            <Ionicons name="camera-outline" size={20} color="#007AFF" />
+                            <Text style={styles.modernSecondaryText}>{t("Retake")}</Text>
+                          </View>
                         </TouchableOpacity>
                         
                         <TouchableOpacity 
-                          style={styles.secondaryButton}
+                          style={styles.modernSecondaryButton}
                           onPress={pickImage}
                           disabled={loading}
                         >
-                          <Ionicons name="images-outline" size={20} color="#ffffff" />
-                          <Text style={styles.secondaryButtonText}>{t("Gallery")}</Text>
+                          <View style={styles.secondaryButtonContent}>
+                            <Ionicons name="images-outline" size={20} color="#007AFF" />
+                            <Text style={styles.modernSecondaryText}>{t("Gallery")}</Text>
+                          </View>
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -514,30 +639,30 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
     paddingBottom: 0,
   },
-  // New AI button styles
-  aiButtonContainer: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 12 : StatusBar.currentHeight + 12 || 12,
-    right: 16,
-    zIndex: 100,
-  },
-  aiButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 8,
-  },
-  aiButtonGradient: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  // AI button styles
+  // aiButtonContainer: {
+  //   position: 'absolute',
+  //   top: Platform.OS === 'ios' ? 12 : StatusBar.currentHeight + 12 || 12,
+  //   right: 16,
+  //   zIndex: 100,
+  // },
+  // aiButton: {
+  //   width: 56,
+  //   height: 56,
+  //   borderRadius: 28,
+  //   shadowColor: "#000",
+  //   shadowOffset: { width: 0, height: 4 },
+  //   shadowOpacity: 0.3,
+  //   shadowRadius: 6,
+  //   elevation: 8,
+  // },
+  // aiButtonGradient: {
+  //   width: 56,
+  //   height: 56,
+  //   borderRadius: 28,
+  //   justifyContent: 'center',
+  //   alignItems: 'center',
+  // },
   welcomeContainer: {
     flex: 1,
     justifyContent: "center",
@@ -579,257 +704,356 @@ const styles = StyleSheet.create({
     height: '100%',
     opacity: 0.9,
   },
-  imageContainer: {
-    width: width * 0.9,
-    height: height * 0.55,
-    marginTop: 40,
+  
+  // Enhanced image selected container
+  imageSelectedContainer: {
+    flex: 1,
+    width: '100%',
+    paddingTop: 20,
+  },
+  
+  // Enhanced header
+  imageHeader: {
+    paddingHorizontal: 20,
+    marginBottom: 16,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  headerTextContainer: {
+    flex: 1,
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 4,
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: '#a0a0a0',
+  },
+  changeImageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 122, 255, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    gap: 4,
+  },
+  changeImageText: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  
+  // Enhanced image container
+  enhancedImageContainer: {
+    flex: 1,
+    marginHorizontal: 16,
     marginBottom: 20,
     borderRadius: 24,
-    overflow: "hidden",
-    backgroundColor: "#2c2c2c",
+    backgroundColor: '#1a1a1a',
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 10,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.6,
+    shadowRadius: 16,
+    elevation: 12,
+    overflow: 'hidden',
   },
-  resetButton: {
-    position: "absolute",
+  imageWrapper: {
+    flex: 1,
+    position: 'relative',
+    aspectRatio: 4/3,
+    minHeight: height * 0.4,
+  },
+  selectedImage: {
+    width: '100%',
+    height: '100%',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  imageBorder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  loadingBlur: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  loadingContent: {
+    alignItems: 'center',
+    gap: 16,
+  },
+  overlayLoadingText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  progressDots: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  progressDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'white',
+  },
+  qualityIndicator: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    gap: 6,
+  },
+  qualityDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#34C759',
+  },
+  qualityText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  cornerAccents: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  cornerAccent: {
+    position: 'absolute',
+    width: 20,
+    height: 20,
+    borderColor: '#007AFF',
+    borderWidth: 3,
+  },
+  topLeft: {
+    top: 12,
+    left: 12,
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+    borderTopLeftRadius: 8,
+  },
+  topRight: {
     top: 12,
     right: 12,
-    backgroundColor: "rgba(0, 0, 0, 0.6)",
-    borderRadius: 20,
-    padding: 4,
-    zIndex: 10,
+    borderLeftWidth: 0,
+    borderBottomWidth: 0,
+    borderTopRightRadius: 8,
   },
-  footerContainer: {
-    width: "100%",
-    paddingHorizontal: 0,
-    marginTop: 'auto',
+  bottomLeft: {
+    bottom: 12,
+    left: 12,
+    borderRightWidth: 0,
+    borderTopWidth: 0,
+    borderBottomLeftRadius: 8,
   },
-  blurOverlay: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    overflow: "hidden",
-    padding: 20,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
-    backgroundColor: "rgba(35, 35, 35, 0.8)",
+  bottomRight: {
+    bottom: 12,
+    right: 12,
+    borderLeftWidth: 0,
+    borderTopWidth: 0,
+    borderBottomRightRadius: 8,
   },
-  // New styles for more intuitive UI
-  mainActionButtonsContainer: {
+  imageInfoBar: {
     flexDirection: 'row',
-    width: '100%',
     justifyContent: 'space-around',
     alignItems: 'center',
-    height: 100,
+    backgroundColor: '#1a1a1a',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  imageInfoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  imageInfoText: {
+    color: '#a0a0a0',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+
+  // Footer container
+  footerContainer: {
+    width: '100%',
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+  },
+  blurOverlay: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: 'hidden',
+    marginHorizontal: 16,
+  },
+
+  // Main action buttons (when no image selected)
+  mainActionButtonsContainer: {
+    flexDirection: 'row',
+    paddingVertical: 20,
+    paddingHorizontal: 24,
   },
   mainActionButton: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
-  },
-  buttonDivider: {
-    width: 1,
-    height: '50%',
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingVertical: 20,
+    paddingHorizontal: 16,
   },
   buttonIconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(0, 122, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   mainActionButtonText: {
     color: '#ffffff',
-    fontWeight: '600',
     fontSize: 16,
+    fontWeight: '600',
   },
-  
-  // Image selected content
+  buttonDivider: {
+    width: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginVertical: 20,
+  },
+
+  // Image selected actions
   imageSelectedActionContainer: {
-    width: '100%',
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-  },
-  lottieContainer: {
-    width: 70,
-    height: 70,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  lottie: {
-    width: '100%',
-    height: '100%',
-  },
-  loadingText: {
-    color: "white",
-    fontWeight: "600",
-    fontSize: 18,
-    marginBottom: 10,
-  },
-  floatingAbortButton: {
-    backgroundColor: "rgba(255, 59, 48, 0.9)",
-    borderRadius: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    marginTop: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-  },
-  abortButtonText: {
-    color: "white",
-    fontWeight: "600",
-    fontSize: 15,
-  },
-  
-  analyzeActionsContainer: {
-    width: '100%',
-  },
-  analyzeButtonEnhanced: {
-    backgroundColor: "#34C759", // iOS green
-    borderRadius: 16,
     paddingVertical: 16,
     paddingHorizontal: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100%",
-    flexDirection: "row",
-    gap: 10,
+  },
+
+  // Loading container
+  loadingContainer: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  loadingHeader: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  loadingTitle: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  loadingSubtitle: {
+    color: '#a0a0a0',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  loadingProgressContainer: {
+    marginBottom: 20,
+  },
+  modernAbortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 59, 48, 0.15)',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    gap: 8,
+  },
+  modernAbortText: {
+    color: '#FF3B30',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
+  // Modern actions container
+  modernActionsContainer: {
+    gap: 16,
+  },
+  primaryAnalyzeButton: {
+    borderRadius: 16,
     shadowColor: "#34C759",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 5,
-    marginBottom: 16,
+    elevation: 8,
   },
-  analyzeButtonTextEnhanced: {
-    color: "#ffffff",
-    fontWeight: "bold",
-    fontSize: 18,
-  },
-  secondaryActionsRow: {
+  primaryButtonGradient: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
-    gap: 12,
-  },
-  secondaryButton: {
-    flex: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  secondaryButtonText: {
-    color: "#ffffff",
-    fontWeight: "500",
-    fontSize: 15,
-  },
-  
-  // Legacy styles for compatibility
-  buttonGroup: {
-    width: "100%",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 12,
-    marginBottom: 16,
-  },
-  buttonContainer: {
-    flex: 1,
-  },
-  cameraButton: {
-    backgroundColor: "#007AFF", // iOS blue
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-    shadowColor: "#007AFF",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  galleryButton: {
-    backgroundColor: "#5856D6", // iOS purple
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-    shadowColor: "#5856D6",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  buttonText: {
-    color: "#ffffff",
-    fontWeight: "600",
-    fontSize: 16,
-  },
-  actionButtonsContainer: {
-    width: "100%",
-    alignItems: "center",
-    marginTop: 8,
-  },
-  analyzeButton: {
-    backgroundColor: "#34C759", // iOS green
-    borderRadius: 16,
-    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 18,
     paddingHorizontal: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100%",
-    flexDirection: "row",
-    gap: 8,
-    shadowColor: "#34C759",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  analyzeButtonDisabled: {
-    backgroundColor: "#34C75980", // iOS green with opacity
-  },
-  analyzeButtonText: {
-    color: "#ffffff",
-    fontWeight: "bold",
-    fontSize: 17,
-  },
-  abortButton: {
-    backgroundColor: "#FF3B30", // iOS red
     borderRadius: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    marginTop: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    shadowColor: "#FF3B30",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
-    width: "50%",
+    gap: 12,
+  },
+  primaryButtonText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '700',
+    flex: 1,
+    textAlign: 'center',
+  },
+
+  // Secondary actions
+  secondaryActionsContainer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modernSecondaryButton: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 122, 255, 0.3)',
+  },
+  secondaryButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  modernSecondaryText: {
+    color: '#007AFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
