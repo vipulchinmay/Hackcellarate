@@ -10,7 +10,8 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator
+  ActivityIndicator,
+  Modal
 } from "react-native";
 import axios from "axios";
 import React, { useState, useEffect } from "react";
@@ -20,6 +21,7 @@ import * as Speech from "expo-speech";
 import { Feather } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import Slider from "@react-native-community/slider";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLanguage } from "@/components/LanguageContext";
 import translations from "@/components/translation";
 
@@ -153,6 +155,20 @@ interface MedicationReminder {
   notificationId?: string;
 }
 
+// Interface for medicine history data
+interface MedicineHistoryItem {
+  id: string;
+  medicineName: string;
+  medicineInfo: string;
+  numberOfDays: number;
+  reminderTime: string;
+  createdAt: string;
+  notificationIds: string[];
+}
+
+// AsyncStorage keys
+const MEDICINE_HISTORY_KEY = '@medicine_history';
+
 export default function Schedule() {
   const params = useLocalSearchParams();
   const router = useRouter();
@@ -170,6 +186,97 @@ export default function Schedule() {
   const [pushToken, setPushToken] = useState<string | null>(null);
   const [hasNotificationPermission, setHasNotificationPermission] = useState(false);
   const [immediatePending, setImmediatePending] = useState(false);
+  
+  // New state for history functionality
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [medicineHistory, setMedicineHistory] = useState<MedicineHistoryItem[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // AsyncStorage functions
+  const saveMedicineToHistory = async (medicineData: MedicineHistoryItem) => {
+    try {
+      const existingHistory = await AsyncStorage.getItem(MEDICINE_HISTORY_KEY);
+      let historyArray: MedicineHistoryItem[] = [];
+      
+      if (existingHistory) {
+        historyArray = JSON.parse(existingHistory);
+      }
+      
+      // Add new medicine data to the beginning of the array
+      historyArray.unshift(medicineData);
+      
+      // Keep only the last 50 entries to prevent storage bloat
+      if (historyArray.length > 50) {
+        historyArray = historyArray.slice(0, 50);
+      }
+      
+      await AsyncStorage.setItem(MEDICINE_HISTORY_KEY, JSON.stringify(historyArray));
+      console.log("Medicine data saved to history successfully");
+    } catch (error) {
+      console.error("Error saving medicine to history:", error);
+    }
+  };
+
+  const loadMedicineHistory = async () => {
+    try {
+      setLoadingHistory(true);
+      const historyData = await AsyncStorage.getItem(MEDICINE_HISTORY_KEY);
+      
+      if (historyData) {
+        const parsedHistory: MedicineHistoryItem[] = JSON.parse(historyData);
+        setMedicineHistory(parsedHistory);
+      } else {
+        setMedicineHistory([]);
+      }
+    } catch (error) {
+      console.error("Error loading medicine history:", error);
+      Alert.alert(t("Error"), t("Failed to load medicine history"));
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const clearMedicineHistory = async () => {
+    try {
+      Alert.alert(
+        t("Clear History"),
+        t("Are you sure you want to clear all medicine history? This action cannot be undone."),
+        [
+          {
+            text: t("Cancel"),
+            style: "cancel"
+          },
+          {
+            text: t("Clear"),
+            style: "destructive",
+            onPress: async () => {
+              await AsyncStorage.removeItem(MEDICINE_HISTORY_KEY);
+              setMedicineHistory([]);
+              Alert.alert(t("Success"), t("Medicine history cleared successfully"));
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error("Error clearing medicine history:", error);
+      Alert.alert(t("Error"), t("Failed to clear medicine history"));
+    }
+  };
+
+  const deleteSingleHistoryItem = async (itemId: string) => {
+    try {
+      const existingHistory = await AsyncStorage.getItem(MEDICINE_HISTORY_KEY);
+      if (existingHistory) {
+        let historyArray: MedicineHistoryItem[] = JSON.parse(existingHistory);
+        historyArray = historyArray.filter(item => item.id !== itemId);
+        await AsyncStorage.setItem(MEDICINE_HISTORY_KEY, JSON.stringify(historyArray));
+        setMedicineHistory(historyArray);
+      }
+    } catch (error) {
+      console.error("Error deleting history item:", error);
+      Alert.alert(t("Error"), t("Failed to delete history item"));
+    }
+  };
 
   // Improved medicine name extraction function
   const extractMedicineNameFromResponse = (responseText: string): string => {
@@ -556,7 +663,7 @@ export default function Schedule() {
         immediateNotificationId = await scheduleImmediateReminder(medicineName);
         if (immediateNotificationId) {
           newNotificationIds.push(immediateNotificationId);
-          console.log("Reminder Scheduled Successfully");
+          console.log("Immediate reminder scheduled successfully");
         } else {
           console.error("Failed to schedule immediate notification");
         }
@@ -625,11 +732,11 @@ export default function Schedule() {
                 newNotificationIds.push(notificationId);
                 successfulNotifications++;
               } else {
-                console.log(`scheduled notification for day ${i+1},reminder is saved`);
+                console.log(`Failed to schedule notification for day ${i+1}, but reminder is saved`);
               }
             }
           } else {
-            errorMessages.push(`saved reminder for day ${i + 1}`);
+            errorMessages.push(`Failed to save reminder for day ${i + 1}`);
           }
         } catch (dayError) {
           console.error(`Error processing day ${i + 1}:`, dayError);
@@ -641,6 +748,22 @@ export default function Schedule() {
       // Update notification IDs state - include both immediate and regular notifications
       setNotificationIds(newNotificationIds);
       
+      // Save medicine data to AsyncStorage history
+      const historyItem: MedicineHistoryItem = {
+        id: `history_${Date.now()}`,
+        medicineName,
+        medicineInfo: raw_response?.toString() || '',
+        numberOfDays: days,
+        reminderTime: reminderTime.toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit'
+        }),
+        createdAt: new Date().toISOString(),
+        notificationIds: newNotificationIds
+      };
+      
+      await saveMedicineToHistory(historyItem);
+      
       // Show appropriate message based on results
       let successMessage;
       if (successfulSaves === 0 && !immediateNotificationId) {
@@ -649,9 +772,9 @@ export default function Schedule() {
       } else {
         // Determine message based on what succeeded
         if (immediateNotificationId) {
-          successMessage = t("Immediate reminder set for 2 minutes from now. ");
+          successMessage = t("Reminder Scheduled Successfully");
           if (successfulSaves > 0) {
-            successMessage += t("{{count}} reminders have been scheduled for {{medicine}}").replace("{{count}}", days.toString()).replace("{{medicine}}", medicineName);
+            successMessage += `\n${t("{{count}} reminders have been scheduled for {{medicine}}").replace("{{count}}", days.toString()).replace("{{medicine}}", medicineName)}`;
           }
         } else if (successfulSaves > 0) {
           successMessage = t("{{count}} reminders have been scheduled for {{medicine}}").replace("{{count}}", days.toString()).replace("{{medicine}}", medicineName);
@@ -686,307 +809,669 @@ export default function Schedule() {
     }
   };
 
-  // Define pharmacy options
-  const pharmacyOptions = [
-    { id: "1", name: t("Apollo Pharmacy"), logo: apollo, url: "https://www.apollopharmacy.in/" },
-    { id: "2", name: t("Med Plus"), logo: medplus, url: "https://www.medplusmart.com/" },
-    { id: "3", name: t("Netmeds"), logo: netmeds, url: "https://www.netmeds.com/" },
-    { id: "4", name: t("1mg"), logo: onemg, url: "https://www.1mg.com/" },
-    { id: "5", name: t("PharmEasy"), logo: pharmeasy, url: "https://www.pharmeasy.in/" },
-  ];
-
-  const openWebsite = (url: string) => {
-    Linking.openURL(url);
+  // Function to handle opening history modal
+  const openHistoryModal = async () => {
+    setShowHistoryModal(true);
+    await loadMedicineHistory();
   };
 
+  // Function to format date for display
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  // Render history item
+  const renderHistoryItem = ({ item }: { item: MedicineHistoryItem }) => (
+    <View style={styles.historyItem}>
+      <View style={styles.historyItemHeader}>
+        <Text style={styles.historyMedicineName}>{item.medicineName}</Text>
+        <TouchableOpacity
+          style={styles.deleteHistoryButton}
+          onPress={() => {
+            Alert.alert(
+              t("Delete Item"),
+              t("Are you sure you want to delete this history item?"),
+              [
+                { text: t("Cancel"), style: "cancel" },
+                {
+                  text: t("Delete"),
+                  style: "destructive",
+                  onPress: () => deleteSingleHistoryItem(item.id)
+                }
+              ]
+            );
+          }}
+        >
+          <Feather name="trash-2" size={16} color="#ff4444" />
+        </TouchableOpacity>
+      </View>
+      <Text style={styles.historyInfo} numberOfLines={50}>
+        {item.medicineInfo.length > 100 
+          ? item.medicineInfo.substring(0, 100) + '...' 
+          : item.medicineInfo}
+      </Text>
+      <View style={styles.historyDetails}>
+        <Text style={styles.historyDetailText}>
+          {t("Days")}: {item.numberOfDays}
+        </Text>
+        <Text style={styles.historyDetailText}>
+          {t("Time")}: {item.reminderTime}
+        </Text>
+      </View>
+      <Text style={styles.historyDate}>
+        {t("Created")}: {formatDate(item.createdAt)}
+      </Text>
+    </View>
+  );
+
+  const handleTimeChange = (event: any, selectedTime?: Date) => {
+    const currentTime = selectedTime || reminderTime;
+    setShowPicker(Platform.OS === 'ios');
+    setReminderTime(currentTime);
+  };
+
+  const openPharmacyApp = (url: string) => {
+    Linking.openURL(url).catch((err) => {
+      console.error("Failed to open URL:", err);
+      Alert.alert(t("Error"), t("Could not open the pharmacy app"));
+    });
+  };
+
+  if (!raw_response) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.errorText}>{t("No medicine information available")}</Text>
+      </View>
+    );
+  }
+
   return (
-    <KeyboardAvoidingView
+    <KeyboardAvoidingView 
+      style={styles.container} 
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      style={{ flex: 1 }}
     >
       <ScrollView contentContainerStyle={styles.scrollContainer}>
-        <View style={styles.container}>
-          <Text style={styles.title}>{t("Medicine Information")}</Text>
-          {raw_response ? (
-            <View style={styles.infoContainer}>
-              <View style={styles.infoHeader}>
-                <Text style={styles.info}>{raw_response}</Text>
-                <TouchableOpacity
-                  style={[
-                    styles.speakerButton,
-                    speaking && styles.speakerButtonActive,
-                  ]}
-                  onPress={speakText}
-                >
-                  <Feather
-                    name={speaking ? "volume-2" : "volume"}
-                    size={24}
-                    color="#1E90FF"
-                  />
-                </TouchableOpacity>
-              </View>
-            </View>
-          ) : (
-            <Text>{t("No valid data available.")}</Text>
-          )}
-          
-          {medicineName && (
-            <View style={styles.medicineNameContainer}>
-              <Text style={styles.medicineNameLabel}>{t("Medicine Name:")}</Text>
-              <Text style={styles.medicineName}>{medicineName}</Text>
-            </View>
-          )}
-          
-          <View style={styles.shoppingContainer}>
-            <Text style={styles.shoppingTitle}>
-              {t("Buy Your Medicine Online")}
-            </Text>
-            <FlatList
-              horizontal
-              data={pharmacyOptions}
-              keyExtractor={(item) => item.id}
-              showsHorizontalScrollIndicator={false}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.shoppingItem}
-                  onPress={() => openWebsite(item.url)}
-                >
-                  <Image source={item.logo} style={styles.shoppingImage} />
-                  <Text style={styles.shoppingItemText}>{item.name}</Text>
-                </TouchableOpacity>
-              )}
-            />
-          </View>
+        {/* Header with History Button */}
+        <View style={styles.header}>
+          <Text style={styles.title}>{t("Medicine Schedule")}</Text>
+          <TouchableOpacity
+            style={styles.historyButton}
+            onPress={openHistoryModal}
+          >
+            <Feather name="clock" size={20} color="#4A90E2" />
+            <Text style={styles.historyButtonText}>{t("History")}</Text>
+          </TouchableOpacity>
+        </View>
 
-          <View style={styles.section}>
-            <Text style={styles.label}>{t("Select Dosage Days:")}</Text>
-            <Text style={styles.dayCount}>
-              {days} {days === 1 ? t("Day") : t("Days")}
+        {/* Medicine Information Card */}
+        <View style={styles.medicineCard}>
+          <View style={styles.medicineHeader}>
+            <Text style={styles.medicineName}>{medicineName}</Text>
+            <TouchableOpacity
+              style={[styles.speakButton, speaking && styles.speakButtonActive]}
+              onPress={speakText}
+            >
+              <Feather 
+                name={speaking ? "volume-x" : "volume-2"} 
+                size={20} 
+                color={speaking ? "#ff4444" : "#4A90E2"} 
+              />
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.responseContainer} nestedScrollEnabled={true}>
+            <Text style={styles.responseText}>{raw_response}</Text>
+          </ScrollView>
+        </View>
+
+        {/* Schedule Settings */}
+        <View style={styles.scheduleCard}>
+          <Text style={styles.sectionTitle}>{t("Schedule Settings")}</Text>
+          
+          {/* Days Slider */}
+          <View style={styles.sliderContainer}>
+            <Text style={styles.sliderLabel}>
+              {t("Number of days")}: {days}
             </Text>
             <Slider
               style={styles.slider}
-              value={days}
               minimumValue={1}
               maximumValue={30}
-              step={1}
+              value={days}
               onValueChange={(value) => setDays(Math.round(value))}
-              minimumTrackTintColor="#1E90FF"
+              minimumTrackTintColor="#4A90E2"
               maximumTrackTintColor="#d3d3d3"
-              thumbTintColor="#1E90FF"
+              thumbStyle={styles.sliderThumb}
             />
           </View>
 
-          <View style={styles.section}>
-            <Text style={styles.label}>{t("Set Reminder Time:")}</Text>
+          {/* Time Picker */}
+          <View style={styles.timeContainer}>
+            <Text style={styles.timeLabel}>{t("Reminder Time")}</Text>
             <TouchableOpacity
-              style={styles.timePickerButton}
+              style={styles.timeButton}
               onPress={() => setShowPicker(true)}
             >
-              <Text style={styles.timePickerText}>
+              <Text style={styles.timeButtonText}>
                 {reminderTime.toLocaleTimeString([], {
                   hour: '2-digit',
                   minute: '2-digit'
                 })}
               </Text>
+              <Feather name="clock" size={20} color="#4A90E2" />
             </TouchableOpacity>
-
-            {showPicker && (
-              <DateTimePicker
-                value={reminderTime}
-                mode="time"
-                display="default"
-                onChange={(event, selectedDate) => {
-                  setShowPicker(Platform.OS === 'ios' ? true : false);
-                  if (selectedDate) {
-                    setReminderTime(selectedDate);
-                  }
-                }}
-              />
-            )}
           </View>
 
-          <View style={styles.buttonContainer}>
+          {showPicker && (
+            <DateTimePicker
+              testID="dateTimePicker"
+              value={reminderTime}
+              mode="time"
+              is24Hour={false}
+              display="default"
+              onChange={handleTimeChange}
+            />
+          )}
+
+          {/* Notification Status */}
+          {!hasNotificationPermission && (
+            <View style={styles.warningContainer}>
+              <Feather name="alert-triangle" size={16} color="#ff8800" />
+              <Text style={styles.warningText}>
+                {t("Notification permission not granted. Reminders will be saved but no notifications will be shown.")}
+              </Text>
+            </View>
+          )}
+
+          {/* Immediate Reminder Status */}
+          {immediatePending && (
+            <View style={styles.infoContainer}>
+              <Feather name="info" size={16} color="#4A90E2" />
+              <Text style={styles.infoText}>
+                {t("An immediate reminder will be set for 2 minutes from now.")}
+              </Text>
+            </View>
+          )}
+
+          {/* Schedule Button */}
+          <TouchableOpacity
+            style={[styles.scheduleButton, isLoading && styles.scheduleButtonDisabled]}
+            onPress={scheduleReminders}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <ActivityIndicator color="#ffffff" size="small" />
+            ) : (
+              <Text style={styles.scheduleButtonText}>
+                {t("Set Reminders")}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* Pharmacy Apps Section */}
+        <View style={styles.pharmacyCard}>
+          <Text style={styles.sectionTitle}>{t("Order Medicine")}</Text>
+          <Text style={styles.pharmacySubtitle}>
+            {t("Choose from these trusted pharmacy apps")}
+          </Text>
+          
+          <View style={styles.pharmacyGrid}>
             <TouchableOpacity
-              style={[styles.scheduleButton, isLoading && styles.disabledButton]}
-              onPress={scheduleReminders}
-              disabled={isLoading}
+              style={styles.pharmacyItem}
+              onPress={() => openPharmacyApp("https://www.1mg.com/")}
             >
-              <View style={styles.buttonContent}>
-                {isLoading ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Feather name="bell" size={20} color="#FFFFFF" />
-                )}
-                <Text style={styles.buttonText}>
-                  {isLoading ? t("Scheduling...") : t("Schedule Reminders")}
-                </Text>
-              </View>
+              <Image source={onemg} style={styles.pharmacyLogo} />
+              <Text style={styles.pharmacyName}>1mg</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.pharmacyItem}
+              onPress={() => openPharmacyApp("https://pharmeasy.in/")}
+            >
+              <Image source={pharmeasy} style={styles.pharmacyLogo} />
+              <Text style={styles.pharmacyName}>PharmEasy</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.pharmacyItem}
+              onPress={() => openPharmacyApp("https://www.netmeds.com/")}
+            >
+              <Image source={netmeds} style={styles.pharmacyLogo} />
+              <Text style={styles.pharmacyName}>Netmeds</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.pharmacyItem}
+              onPress={() => openPharmacyApp("https://www.medplusmart.com/")}
+            >
+              <Image source={medplus} style={styles.pharmacyLogo} />
+              <Text style={styles.pharmacyName}>MedPlus</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.pharmacyItem}
+              onPress={() => openPharmacyApp("https://www.apollopharmacy.in/")}
+            >
+              <Image source={apollo} style={styles.pharmacyLogo} />
+              <Text style={styles.pharmacyName}>Apollo</Text>
             </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
+
+      {/* History Modal */}
+      <Modal
+        visible={showHistoryModal}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setShowHistoryModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>{t("Medicine History")}</Text>
+            <View style={styles.modalHeaderButtons}>
+              {medicineHistory.length > 0 && (
+                <TouchableOpacity
+                  style={styles.clearHistoryButton}
+                  onPress={clearMedicineHistory}
+                >
+                  <Feather name="trash" size={18} color="#ff4444" />
+                  <Text style={styles.clearHistoryText}>{t("Clear All")}</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowHistoryModal(false)}
+              >
+                <Feather name="x" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {loadingHistory ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#4A90E2" />
+              <Text style={styles.loadingText}>{t("Loading history...")}</Text>
+            </View>
+          ) : medicineHistory.length === 0 ? (
+            <View style={styles.emptyHistoryContainer}>
+              <Feather name="clock" size={48} color="#ccc" />
+              <Text style={styles.emptyHistoryText}>
+                {t("No medicine history found")}
+              </Text>
+              <Text style={styles.emptyHistorySubtext}>
+                {t("Schedule some medicines to see them here")}
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              data={medicineHistory}
+              renderItem={renderHistoryItem}
+              keyExtractor={(item) => item.id}
+              style={styles.historyList}
+              showsVerticalScrollIndicator={false}
+            />
+          )}
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
 
-
 const styles = StyleSheet.create({
-  scrollContainer: {
-    flexGrow: 1,
-    paddingBottom: 50,
-  },
   container: {
     flex: 1,
-    padding: 20,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: '#f5f7fa',
+  },
+  scrollContainer: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
   },
   title: {
-    fontSize: 22,
-    fontWeight: "bold",
-    marginBottom: 15,
-    color: "#333",
-    textAlign: "center",
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#2c3e50',
   },
-  infoContainer: {
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    padding: 15,
-    marginBottom: 20,
-    elevation: 3,
-    shadowColor: "#000",
+  historyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+    elevation: 3,
   },
-  infoHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
+  historyButtonText: {
+    marginLeft: 6,
+    color: '#4A90E2',
+    fontWeight: '600',
   },
-  info: {
-    fontSize: 14,
-    color: "#444",
-    lineHeight: 20,
-    flex: 1,
-  },
-  speakerButton: {
-    padding: 8,
-    marginLeft: 10,
-    borderRadius: 20,
-    backgroundColor: "#f0f8ff",
-  },
-  speakerButtonActive: {
-    backgroundColor: "#dcebff",
-  },
-  medicineNameContainer: {
-    backgroundColor: "#e6f2ff",
-    padding: 12,
-    borderRadius: 8,
+  medicineCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 20,
     marginBottom: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  medicineNameLabel: {
-    fontSize: 16,
-    fontWeight: "600",
-    marginRight: 6,
-    color: "#333",
+  medicineHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   medicineName: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#1E90FF",
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    flex: 1,
   },
-  shoppingContainer: {
-    marginBottom: 25,
+  speakButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#f8f9fa',
   },
-  shoppingTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 12,
-    color: "#333",
+  speakButtonActive: {
+    backgroundColor: '#ffe6e6',
   },
-  shoppingItem: {
-    alignItems: "center",
-    marginRight: 20,
-    width: 100,
+  responseContainer: {
+    maxHeight: 150,
   },
-  shoppingImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 10,
-    marginBottom: 8,
-    resizeMode: "contain",
+  responseText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#555',
   },
-  shoppingItemText: {
-    fontSize: 12,
-    textAlign: "center",
-    color: "#555",
+  scheduleCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  section: {
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 16,
+  },
+  sliderContainer: {
     marginBottom: 20,
   },
-  label: {
+  sliderLabel: {
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: '600',
+    color: '#34495e',
     marginBottom: 10,
-    color: "#333",
-  },
-  dayCount: {
-    textAlign: "center",
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#1E90FF",
-    marginBottom: 8,
   },
   slider: {
-    width: "100%",
+    width: '100%',
     height: 40,
   },
-  timePickerButton: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 8,
-    padding: 12,
-    alignItems: "center",
+  sliderThumb: {
+    backgroundColor: '#4A90E2',
+    width: 20,
+    height: 20,
   },
-  timePickerText: {
+  timeContainer: {
+    marginBottom: 20,
+  },
+  timeLabel: {
     fontSize: 16,
-    color: "#1E90FF",
-    fontWeight: "600",
-    alignItems: "center",
-    marginTop: 10,
+    fontWeight: '600',
+    color: '#34495e',
+    marginBottom: 10,
   },
-  buttonContainer: {
-    marginTop: 10,
-    marginBottom: 30,
+  timeButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  timeButtonText: {
+    fontSize: 16,
+    color: '#2c3e50',
+    fontWeight: '500',
+  },
+  warningContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff3cd',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  warningText: {
+    marginLeft: 8,
+    fontSize: 12,
+    color: '#856404',
+    flex: 1,
+  },
+  infoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#d1ecf1',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  infoText: {
+    marginLeft: 8,
+    fontSize: 12,
+    color: '#0c5460',
+    flex: 1,
   },
   scheduleButton: {
-    backgroundColor: "#1E90FF",
-    borderRadius: 10,
+    backgroundColor: '#4A90E2',
+    paddingVertical: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  scheduleButtonDisabled: {
+    backgroundColor: '#bdc3c7',
+  },
+  scheduleButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  pharmacyCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  pharmacySubtitle: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginBottom: 16,
+  },
+  pharmacyGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  pharmacyItem: {
+    width: '30%',
+    alignItems: 'center',
+    marginBottom: 16,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#f8f9fa',
+  },
+  pharmacyLogo: {
+    width: 40,
+    height: 40,
+    marginBottom: 8,
+    resizeMode: 'contain',
+  },
+  pharmacyName: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#2c3e50',
+    textAlign: 'center',
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#e74c3c',
+    textAlign: 'center',
+    marginTop: 50,
+  },
+  // Modal Styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#f5f7fa',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+    paddingTop: Platform.OS === 'ios' ? 50 : 20, // Account for status bar
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+  },
+  modalHeaderButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  clearHistoryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#ffe6e6',
+  },
+  clearHistoryText: {
+    marginLeft: 4,
+    color: '#ff4444',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  closeButton: {
+    padding: 4,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingBottom: 100, // Account for potential bottom navigation
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#7f8c8d',
+  },
+  emptyHistoryContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+    paddingBottom: 100, // Account for potential bottom navigation
+  },
+  emptyHistoryText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#7f8c8d',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  emptyHistorySubtext: {
+    fontSize: 14,
+    color: '#bdc3c7',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  historyList: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 16, // Account for home indicator on iOS
+  },
+  historyItem: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
     padding: 16,
-    alignItems: "center",
-    elevation: 3,
-    shadowColor: "#000",
+    marginBottom: 12,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+    elevation: 3,
   },
-  disabledButton: {
-    backgroundColor: "#90c8ff",
-    opacity: 0.7,
+  historyItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
   },
-  buttonContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  buttonText: {
-    color: "#fff",
+  historyMedicineName: {
     fontSize: 16,
-    fontWeight: "bold",
-    marginLeft: 8,
-  }
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    flex: 1,
+  },
+  deleteHistoryButton: {
+    padding: 8,
+    borderRadius: 16,
+    backgroundColor: '#ffe6e6',
+  },
+  historyInfo: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginBottom: 8,
+    lineHeight: 16,
+  },
+  historyDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  historyDetailText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4A90E2',
+  },
+  historyDate: {
+    fontSize: 12,
+    color: '#95a5a6',
+    fontStyle: 'italic',
+  },
 });
