@@ -28,7 +28,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import 'react-native-gesture-handler';
 // Rest of your imports
 // Base API URL for all requests
-const API_URL = "http://192.168.1.102:6000";
+const API_URL = "http://172.20.10.5:6000";
 
 // Interface for recent contacts
 interface RecentContact {
@@ -357,52 +357,121 @@ export default function ProfileScreen() {
   };
 
   // Share profile with contact
-  const handleShareProfile = async () => {
-    if (!sharePhoneNumber) {
-      Alert.alert(t("Missing Information"), t("Please enter a phone number."));
-      return;
-    }
+ const handleShareProfile = async () => {
+  // Validation
+  if (!sharePhoneNumber || sharePhoneNumber.trim() === '') {
+    Alert.alert(t("Missing Information"), t("Please enter a phone number."));
+    return;
+  }
 
-    if (!shareRelation) {
-      Alert.alert(t("Missing Information"), t("Please enter your relation to the person."));
-      return;
-    }
+  if (!shareRelation || shareRelation.trim() === '') {
+    Alert.alert(t("Missing Information"), t("Please enter your relation to the person."));
+    return;
+  }
 
-    try {
-      setLoading(true);
-      
-      // Prepare data to send
-      const dataToSend = {
-        userData,
-        phoneNumber: sharePhoneNumber,
-        relation: shareRelation,
-        medicalReports: medicalReports.length > 0 ? true : false,
-        insuranceDocuments: insuranceDocuments.length > 0 ? true : false
-      };
-      
-      const response = await axios.post(`${API_URL}/getno`, dataToSend);
+  // Validate phone number format
+  const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
+  if (!phoneRegex.test(sharePhoneNumber.replace(/\s+/g, ''))) {
+    Alert.alert(t("Invalid Phone Number"), t("Please enter a valid phone number."));
+    return;
+  }
 
-      if (response.data.success) {
-        // Save to recent contacts
-        saveRecentContact({
-          name: userData.name,
-          phoneNumber: sharePhoneNumber,
-          relation: shareRelation,
-          timestamp: Date.now()
-        });
-        
-        Alert.alert(t("Success"), t("Profile shared successfully!"));
-        handleCloseShareModal();
-      } else {
-        Alert.alert(t("Error"), t("Failed to share profile. Please try again."));
+  // Validate required user data
+  const requiredFields = ['name', 'age', 'gender', 'blood_group', 'date_of_birth'];
+  const missingUserData = requiredFields.filter(field => !userData[field] || userData[field].toString().trim() === '');
+  
+  if (missingUserData.length > 0) {
+    Alert.alert(
+      t("Incomplete Profile"), 
+      t(`Please complete the following fields: ${missingUserData.join(', ')}`)
+    );
+    return;
+  }
+
+  // Confirmation dialog for sharing sensitive information
+  Alert.alert(
+    t("Confirm Share"),
+    t("You are about to share sensitive medical information via SMS. Do you want to continue?"),
+    [
+      {
+        text: t("Cancel"),
+        style: "cancel"
+      },
+      {
+        text: t("Share"),
+        onPress: async () => {
+          try {
+            setLoading(true);
+            
+            // Clean phone number
+            const cleanedPhoneNumber = sharePhoneNumber.replace(/\s+/g, '');
+            
+            // Prepare data to send
+            const dataToSend = {
+              userData: {
+                name: userData.name?.trim(),
+                age: userData.age,
+                gender: userData.gender?.trim(),
+                blood_group: userData.blood_group?.trim(),
+                date_of_birth: userData.date_of_birth?.trim(),
+                medical_conditions: userData.medical_conditions?.trim() || "None"
+              },
+              phoneNumber: cleanedPhoneNumber,
+              relation: shareRelation.trim(),
+              medicalReports: medicalReports.length > 0,
+              insuranceDocuments: insuranceDocuments.length > 0
+            };
+            
+            const response = await axios.post(`${API_URL}/getno`, dataToSend, {
+              timeout: 15000, // 15 second timeout
+              headers: {
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (response.data.success) {
+              // Save to recent contacts
+              await saveRecentContact({
+                name: userData.name,
+                phoneNumber: cleanedPhoneNumber,
+                relation: shareRelation.trim(),
+                timestamp: Date.now(),
+                messageSid: response.data.messageSid
+              });
+              
+              Alert.alert(
+                t("Success"), 
+                t("Emergency contact information shared successfully!")
+              );
+              handleCloseShareModal();
+            } else {
+              Alert.alert(
+                t("Error"), 
+                response.data.message || t("Failed to share profile. Please try again.")
+              );
+            }
+          } catch (error) {
+            console.error("Error sharing profile:", error);
+            
+            let errorMessage = t("Failed to share profile. Please try again.");
+            
+            if (error.response?.data?.message) {
+              errorMessage = error.response.data.message;
+            } else if (error.code === 'ECONNABORTED') {
+              errorMessage = t("Request timeout. Please check your connection and try again.");
+            } else if (error.code === 'NETWORK_ERROR') {
+              errorMessage = t("Network error. Please check your internet connection.");
+            }
+            
+            Alert.alert(t("Error"), errorMessage);
+          } finally {
+            setLoading(false);
+          }
+        }
       }
-    } catch (error) {
-      console.error("Error sharing profile:", error);
-      Alert.alert(t("Error"), t("Failed to share profile. Please try again."));
-    } finally {
-      setLoading(false);
-    }
-  };
+    ]
+  );
+};
 
   // Render a recent contact item
   const renderRecentContactItem = ({ item }: { item: RecentContact }) => (

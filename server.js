@@ -10,7 +10,7 @@ require("dotenv").config(); // Load environment variables
 const app = express();
 
 // Enable CORS with specific origins
-app.use(cors({ origin: process.env.FRONTEND_URL || "http://localhost:3000" }));
+app.use(cors({ origin: process.env.FRONTEND_URL || "http://localhost:8081" }));
 app.use(express.json());
 
 // Set up storage for uploaded images
@@ -64,7 +64,7 @@ const userSchema = new mongoose.Schema({
   gender: { type: String, required: true },
   blood_group: { type: String, required: true },
   medical_conditions: String,
-  date_of_birth: { type: Date, required: true },
+  date_of_birth: { type: String, required: true },
   photo: { type: String }, // Store the path to the photo
   created_at: { type: Date, default: Date.now },
   updated_at: { type: Date, default: Date.now },
@@ -213,29 +213,125 @@ app.delete("/profile/:id", async (req, res) => {
 // Send SMS with User Info
 app.post("/getno", async (req, res) => {
   try {
-    const { userData, phoneNumber } = req.body;
+    const { userData, phoneNumber, relation, medicalReports, insuranceDocuments } = req.body;
 
+    // Validation
     if (!userData || !phoneNumber) {
-      return res.status(400).json({ success: false, message: "Missing user data or phone number." });
+      return res.status(400).json({ 
+        success: false, 
+        message: "Missing user data or phone number." 
+      });
     }
 
-    // Construct the SMS message
-    const message = `User Details:\nName: ${userData.name}\nAge: ${userData.age}\nGender: ${userData.gender}\nBlood Group: ${userData.blood_group}\nDate of Birth: ${userData.date_of_birth}\nMedical Conditions: ${userData.medical_conditions || "None"}`;
+    // Validate required user data fields
+    const requiredFields = ['name', 'age', 'gender', 'blood_group', 'date_of_birth'];
+    const missingFields = requiredFields.filter(field => !userData[field]);
+    
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Missing required user data: ${missingFields.join(', ')}`
+      });
+    }
+
+    // Format phone number (ensure it starts with country code)
+    let formattedPhoneNumber = phoneNumber.trim();
+    if (!formattedPhoneNumber.startsWith('+')) {
+      // Assuming Indian numbers, add +91 if not present
+      if (formattedPhoneNumber.startsWith('91')) {
+        formattedPhoneNumber = '+' + formattedPhoneNumber;
+      } else if (formattedPhoneNumber.length === 10) {
+        formattedPhoneNumber = '+91' + formattedPhoneNumber;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid phone number format. Please include country code."
+        });
+      }
+    }
+
+    // Construct the SMS message with additional context
+    let message = `🚨 EMERGENCY CONTACT INFORMATION 🚨\n\n`;
+    message += `Shared by: ${relation || 'Emergency Contact'}\n\n`;
+    message += `👤 PERSONAL DETAILS:\n`;
+    message += `Name: ${userData.name}\n`;
+    message += `Age: ${userData.age}\n`;
+    message += `Gender: ${userData.gender}\n`;
+    message += `Blood Group: ${userData.blood_group}\n`;
+    message += `DOB: ${userData.date_of_birth}\n\n`;
+    
+    if (userData.medical_conditions && userData.medical_conditions.trim() !== '') {
+      message += `⚕️ MEDICAL CONDITIONS:\n${userData.medical_conditions}\n\n`;
+    }
+    
+    // Add document availability info
+    if (medicalReports) {
+      message += `📋 Medical reports available\n`;
+    }
+    if (insuranceDocuments) {
+      message += `🏥 Insurance documents available\n`;
+    }
+    
+    message += `\n⚠️ This is confidential medical information. Please handle responsibly.`;
+
+    // Check message length (SMS limit is typically 1600 characters for concatenated messages)
+    if (message.length > 1500) {
+      // Truncate message if too long
+      message = message.substring(0, 1450) + '... [Message truncated due to length]';
+    }
 
     // Send SMS using Twilio
-    await twilioClient.messages.create({
+    const twilioMessage = await twilioClient.messages.create({
       body: message,
       from: process.env.TWILIO_PHONE_NUMBER,
-      to: phoneNumber,
+      to: formattedPhoneNumber,
     });
 
-    res.json({ success: true, message: "SMS sent successfully!" });
+    console.log(`SMS sent successfully. SID: ${twilioMessage.sid}`);
+
+    res.json({ 
+      success: true, 
+      message: "Emergency contact information sent successfully!",
+      messageSid: twilioMessage.sid
+    });
+
   } catch (error) {
     console.error("Error sending SMS:", error);
-    res.status(500).json({ success: false, message: "Failed to send SMS." });
+    
+    // Handle specific Twilio errors
+    if (error.code) {
+      let errorMessage = "Failed to send SMS.";
+      
+      switch (error.code) {
+        case 21211:
+          errorMessage = "Invalid phone number format.";
+          break;
+        case 21614:
+          errorMessage = "Phone number is not a valid mobile number.";
+          break;
+        case 21408:
+          errorMessage = "Permission to send SMS to this number denied.";
+          break;
+        case 21610:
+          errorMessage = "Message content blocked by carrier.";
+          break;
+        default:
+          errorMessage = `SMS service error: ${error.message}`;
+      }
+      
+      return res.status(400).json({
+        success: false,
+        message: errorMessage,
+        errorCode: error.code
+      });
+    }
+
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error while sending SMS." 
+    });
   }
 });
-
 // ===== MEDICINE REMINDER ROUTES =====
 
 // Create and list medicine reminders
@@ -422,11 +518,6 @@ app.post("/api/medicine/remind-sms", async (req, res) => {
     const message = `REMINDER: It's time to take your ${medicineName} at ${formattedTime}. Stay healthy!`;
 
     // Send SMS using Twilio
-    await twilioClient.messages.create({
-      body: message,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to: phoneNumber,
-    });
 
     res.json({ success: true, message: "Reminder SMS sent successfully!" });
   } catch (error) {
